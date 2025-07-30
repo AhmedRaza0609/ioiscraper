@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 import requests
 from streamlit_autorefresh import st_autorefresh
 
+st.set_page_config(layout="wide")
 # === Auto-refresh every 60 seconds ===
 st_autorefresh(interval=60_000, limit=None, key="auto_refresh")
 
@@ -120,7 +121,7 @@ def plot_pakistan_scores(df):
     st.pyplot(fig)
 
 # === Streamlit Interface ===
-st.set_page_config(layout="wide")
+
 st.title("🌍 IOI 2025 Live Scoreboard")
 
 df = fetch_data()
