@@ -1,7 +1,5 @@
 streamlit
-selenium
 beautifulsoup4
 pandas
 matplotlib
-chromedriver-autoinstaller
-
+requests
