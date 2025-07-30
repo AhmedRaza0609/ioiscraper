@@ -1,14 +1,11 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
+import requests
 import time
-from io import BytesIO
-import base64
 
-# --- Country code mapping (same as before) ---
+# --- Country Code Mapping ---
 country_codes = {
     'CHN': 'China', 'KOR': 'South Korea', 'CAN': 'Canada', 'ROU': 'Romania',
     'AUS': 'Australia', 'POL': 'Poland', 'HUN': 'Hungary', 'USA': 'United States',
@@ -34,46 +31,40 @@ country_codes = {
     'DZA': 'Algeria', 'ECU': 'Ecuador', 'RWA': 'Rwanda', 'GHA': 'Ghana',
 }
 
-@st.cache_resource
-def get_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920x1080")
-    return webdriver.Chrome(options=chrome_options)
+# --- Data Fetching ---
+@st.cache_data(ttl=60)
+def fetch_data():
+    try:
+        url = "https://ranking.ioi2025.bo"
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.find("table", id="Scoreboard")
 
-def fetch_data(driver):
-    url = "https://ranking.ioi2025.bo"
-    driver.get(url)
-    time.sleep(5)
+        if not table:
+            return pd.DataFrame()
 
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    table = soup.find("table", id="Scoreboard")
-    if not table:
-        return None
+        headers = [th.get_text(strip=True) or f"Unnamed_{i}" for i, th in enumerate(table.find("thead").find_all("th"))]
+        rows = [
+            [td.get_text(strip=True) for td in tr.find_all("td")]
+            for tr in table.find("tbody").find_all("tr")
+        ]
 
-    headers = [th.get_text(strip=True) or f"Unnamed_{i}" for i, th in enumerate(table.find("thead").find_all("th"))]
-    rows = []
-    for tr in table.find("tbody").find_all("tr"):
-        cols = [td.get_text(strip=True) for td in tr.find_all("td")]
-        if len(cols) == len(headers):
-            rows.append(cols)
+        df = pd.DataFrame(rows, columns=headers)
+        df.columns = df.columns.str.strip()
 
-    if not rows:
-        return None
+        df["Country"] = df["ID"].str[:3]
+        df = df[df["Country"] != "IOI"]
+        df["Country"] = df["Country"].map(country_codes).fillna(df["Country"])
 
-    df = pd.DataFrame(rows, columns=headers)
-    df.columns = df.columns.str.strip()
-    df["Country"] = df["ID"].str[:3]
-    df = df[df["Country"] != "IOI"]
-    df["Country"] = df["Country"].map(country_codes).fillna(df["Country"])
+        score_col = [c for c in df.columns if "Day" in c or "Score" in c][-1]
+        df.rename(columns={score_col: "Total Score"}, inplace=True)
+        df["Total Score"] = pd.to_numeric(df["Total Score"], errors="coerce")
+        df = df.dropna(subset=["Country", "Total Score"])
+        return df
+    except:
+        return pd.DataFrame()
 
-    score_col = [c for c in df.columns if "Day" in c or "Score" in c][-1]
-    df.rename(columns={score_col: "Total Score"}, inplace=True)
-    df["Total Score"] = pd.to_numeric(df["Total Score"], errors="coerce")
-    df = df.dropna(subset=["Country", "Total Score"])
-    return df
-
+# --- Plots ---
 def plot_top50(df):
     top50 = df.groupby("Country")["Total Score"].sum().sort_values(ascending=False).head(50)
     fig, ax = plt.subplots(figsize=(8, 10))
@@ -127,23 +118,19 @@ def plot_pakistan_scores(df):
     st.pyplot(fig)
 
 # === Streamlit Interface ===
-
 st.set_page_config(layout="wide")
 st.title("🌍 IOI 2025 Live Scoreboard")
 
 interval = st.slider("Refresh interval (seconds)", 10, 120, 30)
 placeholder = st.empty()
 
-driver = get_driver()
-
 while True:
     with placeholder.container():
-        df = fetch_data(driver)
+        df = fetch_data()
         if df is None or df.empty:
             st.error("Could not fetch or parse data. Retrying...")
         else:
             plot_top50(df)
             plot_pakistan_context(df)
             plot_pakistan_scores(df)
-
     time.sleep(interval)
