@@ -4,6 +4,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
 import requests
+<<<<<<< HEAD
+=======
+from streamlit_autorefresh import st_autorefresh
+
+# === Auto-refresh every 60 seconds ===
+st_autorefresh(interval=60_000, limit=None, key="auto_refresh")
+>>>>>>> 60ddf7c (fixing stuff)
 
 # Auto-refresh every N seconds
 interval = st.slider("Refresh interval (seconds)", 10, 120, 30)
@@ -111,7 +118,11 @@ st.title("🌍 IOI 2025 Live Scoreboard")
 
 df = fetch_data()
 if df is None or df.empty:
+<<<<<<< HEAD
     st.error("Could not fetch or parse data. Retrying...")
+=======
+    st.error("Could not fetch or parse data.")
+>>>>>>> 60ddf7c (fixing stuff)
 else:
     plot_top50(df)
     plot_pakistan_context(df)
