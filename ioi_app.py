@@ -1,15 +1,14 @@
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
 import requests
+from streamlit_autorefresh import st_autorefresh
 
-# Auto-refresh every N seconds
-interval = st.slider("Refresh interval (seconds)", 10, 120, 30)
-st_autorefresh(interval=interval * 1000, key="data_refresh")
+# === Auto-refresh every 60 seconds ===
+st_autorefresh(interval=60_000, limit=None, key="auto_refresh")
 
-# Country codes mapping
+# --- Country Code Mapping ---
 country_codes = {
     'CHN': 'China', 'KOR': 'South Korea', 'CAN': 'Canada', 'ROU': 'Romania',
     'AUS': 'Australia', 'POL': 'Poland', 'HUN': 'Hungary', 'USA': 'United States',
@@ -35,6 +34,7 @@ country_codes = {
     'DZA': 'Algeria', 'ECU': 'Ecuador', 'RWA': 'Rwanda', 'GHA': 'Ghana',
 }
 
+# --- Data Fetching ---
 @st.cache_data(ttl=60)
 def fetch_data():
     try:
@@ -44,13 +44,20 @@ def fetch_data():
         table = soup.find("table", id="Scoreboard")
         if not table:
             return pd.DataFrame()
+
         headers = [th.get_text(strip=True) or f"Unnamed_{i}" for i, th in enumerate(table.find("thead").find_all("th"))]
-        rows = [[td.get_text(strip=True) for td in tr.find_all("td")] for tr in table.find("tbody").find_all("tr")]
+        rows = [
+            [td.get_text(strip=True) for td in tr.find_all("td")]
+            for tr in table.find("tbody").find_all("tr")
+        ]
+
         df = pd.DataFrame(rows, columns=headers)
         df.columns = df.columns.str.strip()
+
         df["Country"] = df["ID"].str[:3]
         df = df[df["Country"] != "IOI"]
         df["Country"] = df["Country"].map(country_codes).fillna(df["Country"])
+
         score_col = [c for c in df.columns if "Day" in c or "Score" in c][-1]
         df.rename(columns={score_col: "Total Score"}, inplace=True)
         df["Total Score"] = pd.to_numeric(df["Total Score"], errors="coerce")
@@ -59,6 +66,7 @@ def fetch_data():
     except:
         return pd.DataFrame()
 
+# --- Plots ---
 def plot_top50(df):
     top50 = df.groupby("Country")["Total Score"].sum().sort_values(ascending=False).head(50)
     fig, ax = plt.subplots(figsize=(8, 10))
@@ -71,9 +79,11 @@ def plot_pakistan_context(df):
     ranked = country_total.reset_index().reset_index()
     ranked.columns = ["Rank", "Country", "Total Score"]
     ranked["Rank"] += 1
+
     if "Pakistan" not in ranked["Country"].values:
         st.warning("Pakistan not in the ranking.")
         return
+
     n = ranked[ranked["Country"] == "Pakistan"]["Rank"].values[0]
     nearby = ranked[(ranked["Rank"] >= n - 5) & (ranked["Rank"] <= n + 5)]
     st.subheader("📊 Countries Near Pakistan in Ranking")
@@ -83,10 +93,12 @@ def plot_pakistan_scores(df):
     pak = df[df["Country"] == "Pakistan"].copy()
     for col in ["souvenirs", "triples", "worldmap"]:
         pak[col] = pd.to_numeric(pak[col], errors="coerce")
+
     df_no_ioi = df[df["ID"].str[:3] != "IOI"].copy()
     df_no_ioi = df_no_ioi.sort_values("Total Score", ascending=False)
     df_no_ioi["Rank_no_ioi"] = range(1, len(df_no_ioi) + 1)
     pak = pak.merge(df_no_ioi[["ID", "Rank_no_ioi"]], on="ID")
+
     fig, ax = plt.subplots(figsize=(10, 6))
     x = range(len(pak))
     bar_width = 0.2
@@ -94,24 +106,26 @@ def plot_pakistan_scores(df):
     ax.bar([i - 0.5 * bar_width for i in x], pak["triples"], width=bar_width, label="Triples")
     ax.bar([i + 0.5 * bar_width for i in x], pak["worldmap"], width=bar_width, label="Worldmap")
     bars_total = ax.bar([i + 1.5 * bar_width for i in x], pak["Total Score"], width=bar_width, label="Total")
+
     for i, bar in enumerate(bars_total):
         rank_ioi = df[df["ID"] == pak.iloc[i]["ID"]].index[0] + 1
         rank_no_ioi = pak.iloc[i]["Rank_no_ioi"]
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2, f"{rank_ioi}/{rank_no_ioi}",
                 ha="center", va="bottom", fontsize=9, fontweight="bold")
+
     ax.set_xticks(range(len(pak)))
     ax.set_xticklabels(pak["First Name"] + " " + pak["Last Name"])
     ax.set_title("🇵🇰 Pakistan: Problem-wise Scores and Ranks")
     ax.legend()
     st.pyplot(fig)
 
-# === Interface ===
+# === Streamlit Interface ===
 st.set_page_config(layout="wide")
 st.title("🌍 IOI 2025 Live Scoreboard")
 
 df = fetch_data()
 if df is None or df.empty:
-    st.error("Could not fetch or parse data. Retrying...")
+    st.error("Could not fetch or parse data.")
 else:
     plot_top50(df)
     plot_pakistan_context(df)
