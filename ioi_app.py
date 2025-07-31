@@ -1,11 +1,12 @@
 import streamlit as st
-st.set_page_config(layout="wide")  # must be first Streamlit command
-
 import pandas as pd
 import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
 import requests
 from streamlit_autorefresh import st_autorefresh
+
+# === Must be first Streamlit command ===
+st.set_page_config(layout="wide")
 
 # === Auto-refresh every 60 seconds ===
 st_autorefresh(interval=60_000, limit=None, key="auto_refresh")
@@ -36,29 +37,28 @@ country_codes = {
     'DZA': 'Algeria', 'ECU': 'Ecuador', 'RWA': 'Rwanda', 'GHA': 'Ghana',
 }
 
-# --- Data Fetching ---
 @st.cache_data(ttl=60)
 def fetch_data():
     try:
         url = "https://ranking.ioi2025.bo"
         response = requests.get(url, timeout=10)
-        if response.status_code != 200:
-            st.warning(f"Status code: {response.status_code}")
-            return pd.DataFrame()
-
         soup = BeautifulSoup(response.text, "html.parser")
         table = soup.find("table", id="Scoreboard")
         if not table:
-            st.warning("Could not find table with id='Scoreboard'")
+            st.warning("No table with id 'Scoreboard' found.")
+            st.text("Page preview:\n" + response.text[:1000])
             return pd.DataFrame()
 
         headers = [th.get_text(strip=True) or f"Unnamed_{i}" for i, th in enumerate(table.find("thead").find_all("th"))]
-        rows = [
-            [td.get_text(strip=True) for td in tr.find_all("td")]
-            for tr in table.find("tbody").find_all("tr")
-        ]
+        st.write("🔍 Table headers detected:", headers)
 
+        rows = [[td.get_text(strip=True) for td in tr.find_all("td")] for tr in table.find("tbody").find_all("tr")]
         df = pd.DataFrame(rows, columns=headers)
+
+        if "ID" not in df.columns:
+            st.error("❌ Column 'ID' not found in table.")
+            return pd.DataFrame()
+
         df.columns = df.columns.str.strip()
         df["Country"] = df["ID"].str[:3]
         df = df[df["Country"] != "IOI"]
@@ -70,10 +70,9 @@ def fetch_data():
         df = df.dropna(subset=["Country", "Total Score"])
         return df
     except Exception as e:
-        st.error(f"Fetch error: {e}")
+        st.error(f"Exception while fetching: {e}")
         return pd.DataFrame()
 
-# --- Plotting Functions ---
 def plot_top50(df):
     top50 = df.groupby("Country")["Total Score"].sum().sort_values(ascending=False).head(50)
     fig, ax = plt.subplots(figsize=(8, 10))
@@ -104,7 +103,7 @@ def plot_pakistan_scores(df):
     df_no_ioi = df[df["ID"].str[:3] != "IOI"].copy()
     df_no_ioi = df_no_ioi.sort_values("Total Score", ascending=False)
     df_no_ioi["Rank_no_ioi"] = range(1, len(df_no_ioi) + 1)
-    pak = pak.merge(df_no_ioi[["ID", "Rank_no_ioi"]], on="ID")
+    pak = pak.merge(df_no_ioi[["ID", "Rank_no_ioi"]], on="ID", how="left")
 
     fig, ax = plt.subplots(figsize=(10, 6))
     x = range(len(pak))
@@ -116,7 +115,7 @@ def plot_pakistan_scores(df):
 
     for i, bar in enumerate(bars_total):
         rank_ioi = df[df["ID"] == pak.iloc[i]["ID"]].index[0] + 1
-        rank_no_ioi = pak.iloc[i]["Rank_no_ioi"]
+        rank_no_ioi = pak.iloc[i].get("Rank_no_ioi", "?")
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2, f"{rank_ioi}/{rank_no_ioi}",
                 ha="center", va="bottom", fontsize=9, fontweight="bold")
 
@@ -126,12 +125,12 @@ def plot_pakistan_scores(df):
     ax.legend()
     st.pyplot(fig)
 
-# === Streamlit Interface ===
+# === Interface ===
 st.title("🌍 IOI 2025 Live Scoreboard")
 
 df = fetch_data()
-if df.empty:
-    st.error("Could not fetch or parse data.")
+if df is None or df.empty:
+    st.error("❌ Could not fetch or parse data.")
 else:
     plot_top50(df)
     plot_pakistan_context(df)
