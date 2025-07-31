@@ -1,11 +1,12 @@
 import streamlit as st
+st.set_page_config(layout="wide")  # must be first Streamlit command
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
 import requests
 from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(layout="wide")
 # === Auto-refresh every 60 seconds ===
 st_autorefresh(interval=60_000, limit=None, key="auto_refresh")
 
@@ -41,9 +42,14 @@ def fetch_data():
     try:
         url = "https://ranking.ioi2025.bo"
         response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            st.warning(f"Status code: {response.status_code}")
+            return pd.DataFrame()
+
         soup = BeautifulSoup(response.text, "html.parser")
         table = soup.find("table", id="Scoreboard")
         if not table:
+            st.warning("Could not find table with id='Scoreboard'")
             return pd.DataFrame()
 
         headers = [th.get_text(strip=True) or f"Unnamed_{i}" for i, th in enumerate(table.find("thead").find_all("th"))]
@@ -54,7 +60,6 @@ def fetch_data():
 
         df = pd.DataFrame(rows, columns=headers)
         df.columns = df.columns.str.strip()
-
         df["Country"] = df["ID"].str[:3]
         df = df[df["Country"] != "IOI"]
         df["Country"] = df["Country"].map(country_codes).fillna(df["Country"])
@@ -64,10 +69,11 @@ def fetch_data():
         df["Total Score"] = pd.to_numeric(df["Total Score"], errors="coerce")
         df = df.dropna(subset=["Country", "Total Score"])
         return df
-    except:
+    except Exception as e:
+        st.error(f"Fetch error: {e}")
         return pd.DataFrame()
 
-# --- Plots ---
+# --- Plotting Functions ---
 def plot_top50(df):
     top50 = df.groupby("Country")["Total Score"].sum().sort_values(ascending=False).head(50)
     fig, ax = plt.subplots(figsize=(8, 10))
@@ -121,11 +127,10 @@ def plot_pakistan_scores(df):
     st.pyplot(fig)
 
 # === Streamlit Interface ===
-
 st.title("🌍 IOI 2025 Live Scoreboard")
 
 df = fetch_data()
-if df is None or df.empty:
+if df.empty:
     st.error("Could not fetch or parse data.")
 else:
     plot_top50(df)
