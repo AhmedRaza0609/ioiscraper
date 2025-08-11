@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
-import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import time
 from streamlit_autorefresh import st_autorefresh
 
 # === Must be first Streamlit command ===
@@ -40,18 +42,26 @@ country_codes = {
 @st.cache_data(ttl=60)
 def fetch_data():
     try:
-        url = "https://ranking.ioi2025.bo"
-        response = requests.get(url, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        driver = webdriver.Chrome(options=chrome_options)
+
+        url = "https://ranking.ioi2025.bo/"
+        driver.get(url)
+        time.sleep(3)  # Wait for JS to render
+
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        driver.quit()
+
         table = soup.find("table", id="Scoreboard")
         if not table:
             st.warning("No table with id 'Scoreboard' found.")
-            st.text("Page preview:\n" + response.text[:1000])
             return pd.DataFrame()
 
         headers = [th.get_text(strip=True) or f"Unnamed_{i}" for i, th in enumerate(table.find("thead").find_all("th"))]
-        st.write("🔍 Table headers detected:", headers)
-
         rows = [[td.get_text(strip=True) for td in tr.find_all("td")] for tr in table.find("tbody").find_all("tr")]
         df = pd.DataFrame(rows, columns=headers)
 
@@ -64,20 +74,21 @@ def fetch_data():
         df = df[df["Country"] != "IOI"]
         df["Country"] = df["Country"].map(country_codes).fillna(df["Country"])
 
-        score_col = [c for c in df.columns if "Day" in c or "Score" in c][-1]
+        score_col = [c for c in df.columns if "Global" in c or "Score" in c][-1]
         df.rename(columns={score_col: "Total Score"}, inplace=True)
         df["Total Score"] = pd.to_numeric(df["Total Score"], errors="coerce")
         df = df.dropna(subset=["Country", "Total Score"])
         return df
+
     except Exception as e:
         st.error(f"Exception while fetching: {e}")
         return pd.DataFrame()
 
 def plot_top50(df):
-    top50 = df.groupby("Country")["Total Score"].sum().sort_values(ascending=False).head(50)
+    top50 = df.groupby("Country")["Total Score"].sum().sort_values(ascending=False).head(30)
     fig, ax = plt.subplots(figsize=(8, 10))
     top50.sort_values().plot(kind="barh", ax=ax, color="skyblue")
-    ax.set_title("Top 50 Countries by Total Score")
+    ax.set_title("Top 30 Countries by Total Score")
     st.pyplot(fig)
 
 def plot_pakistan_context(df):
@@ -93,11 +104,20 @@ def plot_pakistan_context(df):
     n = ranked[ranked["Country"] == "Pakistan"]["Rank"].values[0]
     nearby = ranked[(ranked["Rank"] >= n - 5) & (ranked["Rank"] <= n + 5)]
     st.subheader("📊 Countries Near Pakistan in Ranking")
-    st.dataframe(nearby)
+    st.dataframe(nearby, height=400)
 
 def plot_pakistan_scores(df):
     pak = df[df["Country"] == "Pakistan"].copy()
-    for col in ["souvenirs", "triples", "worldmap"]:
+
+    # Detect all problem columns dynamically
+    known_cols = {"First Name", "Last Name", "ID", "Country", "Total Score"}
+    all_cols = [col for col in df.columns if col not in known_cols]
+
+    # Automatically detect up to 6 problem columns
+    problem_cols = ['souvenirs','triples','worldmap','festival','migrations','obstacles']
+
+
+    for col in problem_cols:
         pak[col] = pd.to_numeric(pak[col], errors="coerce")
 
     df_no_ioi = df[df["ID"].str[:3] != "IOI"].copy()
@@ -105,13 +125,18 @@ def plot_pakistan_scores(df):
     df_no_ioi["Rank_no_ioi"] = range(1, len(df_no_ioi) + 1)
     pak = pak.merge(df_no_ioi[["ID", "Rank_no_ioi"]], on="ID", how="left")
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(12, 6))
     x = range(len(pak))
-    bar_width = 0.2
-    ax.bar([i - 1.5 * bar_width for i in x], pak["souvenirs"], width=bar_width, label="Souvenirs")
-    ax.bar([i - 0.5 * bar_width for i in x], pak["triples"], width=bar_width, label="Triples")
-    ax.bar([i + 0.5 * bar_width for i in x], pak["worldmap"], width=bar_width, label="Worldmap")
-    bars_total = ax.bar([i + 1.5 * bar_width for i in x], pak["Total Score"], width=bar_width, label="Total")
+    bar_width = 0.8 / 7  # 6 problems + 1 total = 7 bars
+
+    # Plot 6 problem bars
+    for i, col in enumerate(problem_cols):
+        offset = (i - 3) * bar_width  # centered around 0
+        ax.bar([j + offset for j in x], pak[col], width=bar_width, label=col.capitalize())
+
+    # Plot total score bar
+    offset = (3) * bar_width
+    bars_total = ax.bar([j + offset for j in x], pak["Total Score"], width=bar_width, label="Total", color="black")
 
     for i, bar in enumerate(bars_total):
         rank_ioi = df[df["ID"] == pak.iloc[i]["ID"]].index[0] + 1
@@ -121,9 +146,10 @@ def plot_pakistan_scores(df):
 
     ax.set_xticks(range(len(pak)))
     ax.set_xticklabels(pak["First Name"] + " " + pak["Last Name"])
-    ax.set_title("🇵🇰 Pakistan: Problem-wise Scores and Ranks")
+    ax.set_title("🇵🇰 Pakistan: Problem-wise Scores (6 problems + Total)")
     ax.legend()
     st.pyplot(fig)
+
 
 # === Interface ===
 st.title("🌍 IOI 2025 Live Scoreboard")
