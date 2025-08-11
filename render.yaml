@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: ioi-scraper
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run ioi_app.py --server.port $PORT
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.13
